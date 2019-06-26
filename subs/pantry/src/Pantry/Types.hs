@@ -114,7 +114,6 @@ import qualified Data.Conduit.Tar as Tar
 import qualified RIO.Text as T
 import qualified RIO.ByteString as B
 import qualified RIO.ByteString.Lazy as BL
-import RIO.Char (isSpace)
 import RIO.List (intersperse)
 import RIO.Time (toGregorian, Day, fromGregorianValid, UTCTime)
 import qualified RIO.Map as Map
@@ -130,17 +129,17 @@ import Database.Persist
 import Database.Persist.Sql
 import Pantry.SHA256 (SHA256)
 import qualified Pantry.SHA256 as SHA256
-import qualified Distribution.Compat.ReadP as Parse
 import Distribution.CabalSpecVersion (CabalSpecVersion (..), cabalSpecLatest)
-import Distribution.Parsec.Common (PError (..), PWarning (..), showPos)
+import Distribution.Parsec (PError (..), PWarning (..), showPos, simpleParsec)
 import Distribution.Types.PackageName (PackageName, unPackageName, mkPackageName)
 import Distribution.Types.VersionRange (VersionRange)
 import Distribution.PackageDescription (FlagName, unFlagName, GenericPackageDescription)
 import Distribution.Types.PackageId (PackageIdentifier (..))
 import qualified Distribution.Text
+import qualified Distribution.Pretty
 import qualified Hpack.Config as Hpack
 import Distribution.ModuleName (ModuleName)
-import Distribution.Types.Version (Version, mkVersion)
+import Distribution.Types.Version (Version, mkVersion, nullVersion)
 import Network.HTTP.Client (parseRequest)
 import Network.HTTP.Types (Status, statusCode)
 import Data.Text.Read (decimal)
@@ -1057,12 +1056,21 @@ commaSeparated = fold . NE.intersperse ", "
 cabalSpecLatestVersion :: Version
 cabalSpecLatestVersion =
   case cabalSpecLatest of
-    CabalSpecOld -> error "this cannot happen"
+    CabalSpecV1_0  -> error "this cannot happen"
+    CabalSpecV1_2  -> error "this cannot happen"
     CabalSpecV1_22 -> error "this cannot happen"
     CabalSpecV1_24 -> error "this cannot happen"
+    CabalSpecV1_4  -> error "this cannot happen"
+    CabalSpecV1_6  -> error "this cannot happen"
+    CabalSpecV1_8  -> error "this cannot happen"
+    CabalSpecV1_10 -> error "this cannot happen"
+    CabalSpecV1_12 -> error "this cannot happen"
+    CabalSpecV1_18 -> error "this cannot happen"
+    CabalSpecV1_20 -> error "this cannot happen"
     CabalSpecV2_0 -> error "this cannot happen"
     CabalSpecV2_2 -> error "this cannot happen"
     CabalSpecV2_4 -> mkVersion [2, 4]
+    CabalSpecV3_0 -> mkVersion [3, 0]
 
 data BuildFile = BFCabal !SafeFilePath !TreeEntry
                | BFHpack !TreeEntry -- We don't need SafeFilePath for Hpack since it has to be package.yaml file
@@ -1245,16 +1253,11 @@ data PackageTarball = PackageTarball
 --
 -- @since 0.1.0.0
 parsePackageIdentifier :: String -> Maybe PackageIdentifier
-parsePackageIdentifier str =
-    case [p | (p, s) <- Parse.readP_to_S parser str, all isSpace s] of
-        [] -> Nothing
-        (p:_) -> Just p
-  where
-    parser = do
-        n <- Distribution.Text.parse
-        -- version is a required component of a package identifier for Stack
-        v <- Parse.char '-' >> Distribution.Text.parse
-        return (PackageIdentifier n v)
+parsePackageIdentifier str = do
+    pkgi <- simpleParsec str
+    -- version is a required component of a package identifier for Stack
+    guard (not (pkgVersion pkgi == nullVersion))
+    pure pkgi
 
 -- | Parse a package name from a 'String'.
 --
@@ -1690,10 +1693,10 @@ toCabalStringMap = Map.mapKeysMonotonic CabalString
 unCabalStringMap :: Map (CabalString a) v -> Map a v
 unCabalStringMap = Map.mapKeysMonotonic unCabalString
 
-instance Distribution.Text.Text a => ToJSON (CabalString a) where
-  toJSON = toJSON . Distribution.Text.display . unCabalString
-instance Distribution.Text.Text a => ToJSONKey (CabalString a) where
-  toJSONKey = toJSONKeyText $ T.pack . Distribution.Text.display . unCabalString
+instance Distribution.Pretty.Pretty a => ToJSON (CabalString a) where
+  toJSON = toJSON . Distribution.Pretty.prettyShow . unCabalString
+instance Distribution.Pretty.Pretty a => ToJSONKey (CabalString a) where
+  toJSONKey = toJSONKeyText $ T.pack . Distribution.Pretty.prettyShow . unCabalString
 
 instance forall a. IsCabalString a => FromJSON (CabalString a) where
   parseJSON = withText name $ \t ->

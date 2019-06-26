@@ -1,5 +1,19 @@
 resolver: snapshot.yaml
 
+extra-deps:
+# Use Cabal 3.0
+- git: https://github.com/hsyl20/cabal.git
+  commit: bfd1e50d0b7f4e0c565096679ab8005ffcac8f5e
+  subdirs:
+     - Cabal/
+# and a newer cabal-doctest accordingly
+- git: https://github.com/hsyl20/cabal-doctest.git
+  commit: b2c204e46103c3f75b7fbe6fa66a96625c2e2ebe
+
+# and newer hpack
+- git: https://github.com/hsyl20/hpack
+  commit: 3b8109acfd300dd215db4f452436b5ad739fcfdc
+
 packages:
 - .
 - subs/pantry
@@ -27,3 +41,5 @@ flags:
 
 ghc-options:
    "$locals": -fhide-source-paths
+
+allow-newer: true

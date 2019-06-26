@@ -44,9 +44,11 @@ import           Distribution.PackageDescription.Parsec
 import           Distribution.Simple.Glob (matchDirFileGlob)
 import           Distribution.System (OS (..), Arch, Platform (..))
 import qualified Distribution.Text as D
+import           Distribution.Pretty (prettyShow)
 import qualified Distribution.Types.CondTree as Cabal
 import qualified Distribution.Types.ExeDependency as Cabal
 import           Distribution.Types.ForeignLib
+import           Distribution.Types.LibraryName
 import qualified Distribution.Types.LegacyExeDependency as Cabal
 import           Distribution.Types.MungedPackageName
 import qualified Distribution.Types.UnqualComponentName as Cabal
@@ -191,8 +193,7 @@ packageFromPackageDescription packageConfig pkgFlags (PackageDescriptionPair pkg
 
     subLibNames
       = S.fromList
-      $ map (T.pack . Cabal.unUnqualComponentName)
-      $ mapMaybe libName -- this is a design bug in the Cabal API: this should statically be known to exist
+      $ map (T.pack . showLibraryName . libName)
       $ filter (buildable . libBuildInfo)
       $ subLibraries pkg
 
@@ -203,8 +204,8 @@ packageFromPackageDescription packageConfig pkgFlags (PackageDescriptionPair pkg
       $ foreignLibs pkg
 
     toInternalPackageMungedName
-      = T.pack . unMungedPackageName . computeCompatPackageName (pkgName pkgId)
-      . Just . Cabal.mkUnqualComponentName . T.unpack
+      = T.pack . prettyShow . MungedPackageName (pkgName pkgId)
+      . LSubLibName . Cabal.mkUnqualComponentName . T.unpack
 
     -- Gets all of the modules, files, build files, and data files that
     -- constitute the package. This is primarily used for dirtiness
@@ -302,11 +303,11 @@ generatePkgDescOpts installMap installedMap omitPkgs addPkgs cabalfp pkg compone
                          []
                          (return . generate CLib . libBuildInfo)
                          (library pkg)
-                   , mapMaybe
+                   , map
                          (\sublib -> do
-                            let maybeLib = CInternalLib . T.pack . Cabal.unUnqualComponentName <$> libName sublib
-                            flip generate  (libBuildInfo sublib) <$> maybeLib
-                          )
+                               generate
+                                    (CInternalLib (T.pack (showLibraryName (libName sublib))))
+                                    (libBuildInfo sublib))
                          (subLibraries pkg)
                    , fmap
                          (\exe ->
@@ -384,9 +385,9 @@ generateBuildInfoOpts BioInput {..} =
     pkgs =
         biAddPackages ++
         [ name
-        | Dependency name _ <- targetBuildDepends biBuildInfo
+        | Dependency name _ _ <- targetBuildDepends biBuildInfo
         , name `notElem` biOmitPackages]
-    ghcOpts = concatMap snd . filter (isGhc . fst) $ options biBuildInfo
+    ghcOpts = concatMap snd . filter (isGhc . fst) . perCompilerFlavorToList $ options biBuildInfo
       where
         isGhc GHC = True
         isGhc _ = False
@@ -681,7 +682,7 @@ packageDescModulesAndFiles pkg = do
     return (modules, files, dfiles, warnings)
   where
     libComponent = const CLib
-    internalLibComponent = CInternalLib . T.pack . maybe "" Cabal.unUnqualComponentName . libName
+    internalLibComponent = CInternalLib . T.pack . showLibraryName . libName
     exeComponent = CExe . T.pack . Cabal.unUnqualComponentName . exeName
     testComponent = CTest . T.pack . Cabal.unUnqualComponentName . testName
     benchComponent = CBench . T.pack . Cabal.unUnqualComponentName . benchmarkName
@@ -799,7 +800,7 @@ resolveComponentFiles component build names = do
             (if null dirs then [dir] else dirs)
             names
     cfiles <- buildOtherSources build
-    return (modules, files <> cfiles, warnings)
+    return (modules, cfiles <> files, warnings)
 
 -- | Get all C sources and extra source files in a build.
 buildOtherSources :: BuildInfo -> RIO Ctx [DotCabalPath]
@@ -815,9 +816,10 @@ buildOtherSources build = do
                         warnMissingFile "File" cwd fp file
                         return Nothing
                     Just p -> return $ Just (toCabalPath p)
-    csources <- resolveDirFiles (cSources build) DotCabalCFilePath
-    jsources <- resolveDirFiles (targetJsSources build) DotCabalFilePath
-    return (csources <> jsources)
+    csources   <- resolveDirFiles (cSources build) DotCabalCFilePath
+    cmmsources <- resolveDirFiles (cmmSources build) DotCabalCFilePath
+    jsources   <- resolveDirFiles (targetJsSources build) DotCabalFilePath
+    return (cmmsources <> csources <> jsources)
 
 -- | Get the target's JS sources.
 targetJsSources :: BuildInfo -> [FilePath]
@@ -860,7 +862,7 @@ resolvePackageDescription packageConfig (GenericPackageDescription desc defaultF
           desc {library =
                   fmap (resolveConditions rc updateLibDeps) mlib
                ,subLibraries =
-                  map (\(n, v) -> (resolveConditions rc updateLibDeps v){libName=Just n})
+                  map (\(n, v) -> (resolveConditions rc updateLibDeps v){libName=LSubLibName n})
                       subLibs
                ,foreignLibs =
                   map (\(n, v) -> (resolveConditions rc updateForeignLibDeps v){foreignLibName=n})
@@ -989,11 +991,11 @@ resolveConditions rc addDeps (CondNode lib deps cs) = basic <> children
 
 -- | Get the name of a dependency.
 depName :: Dependency -> PackageName
-depName (Dependency n _) = n
+depName (Dependency n _ _) = n
 
 -- | Get the version range of a dependency.
 depRange :: Dependency -> VersionRange
-depRange (Dependency _ r) = r
+depRange (Dependency _ r _) = r
 
 -- | Try to resolve the list of base names in the given directory by
 -- looking for unique instances of base names applied with the given

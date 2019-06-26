@@ -20,6 +20,7 @@ import Distribution.Simple.Program.Db
 import Distribution.Simple.Program.HcPkg (dump)
 import Distribution.System (Arch(..), OS(..))
 import qualified Distribution.Text as DT
+import qualified Distribution.Pretty as Pretty
 import qualified Distribution.Types.CondTree as C
 import Distribution.Types.Dependency (depPkgName, depVerRange, Dependency(..))
 import Distribution.Types.ExeDependency (ExeDependency(..))
@@ -259,8 +260,8 @@ pkgBoundsError dep maintainers mdepVer isBoot users =
     compToText CompTestSuite = "test-suite"
     compToText CompBenchmark = "benchmark"
 
-    display :: DT.Text a => a -> Text
-    display = T.pack . DT.display
+    display :: Pretty.Pretty a => a -> Text
+    display = T.pack . Pretty.prettyShow
 
 snapshotVersion :: PackageLocationImmutable -> Maybe Version
 snapshotVersion (PLIHackage (PackageIdentifier _ v) _ _) = Just v
@@ -362,10 +363,10 @@ getPkgInfo constraints compilerVer pname sp = do
         setupDepends = maybe mempty C.setupDepends $
                        C.setupBuildInfo (C.packageDescription gpd)
         -- TODO: we should also check executable names, not only their packages
-        buildInfoDeps = map (\(ExeDependency p _ vr) -> Dependency p vr) . C.buildToolDepends
+        buildInfoDeps = map (\(ExeDependency p _ vr) -> Dependency p vr Set.empty) . C.buildToolDepends
         gpdFlags = Map.fromList $ map (C.flagName &&& C.flagDefault) (C.genPackageFlags gpd)
         checkCond = checkConditions compilerVer pname $ maybe mempty pcFlags mpc <> gpdFlags
-        collectDeps0 :: Monoid a
+        collectDeps0 :: (Semigroup a, Monoid a)
                      => C.CondTree C.ConfVar [Dependency] a
                      -> (a -> C.BuildInfo)
                      -> [Dependency]
